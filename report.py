@@ -8,8 +8,24 @@ from typing import List
 from .models import TripCandidate
 
 
+_SCENARIO_LABEL = {
+    "day_trip":          "마카오 당일치기 (HKG ↔ HKG)",
+    "overnight_rt":      "마카오 1박 + HK · 페리 왕복 (HKG ↔ HKG)",
+    "overnight_mfm_out": "마카오 1박 + HK · 페리 편도 (HKG 입국 / MFM 귀국)",
+}
+
+
 def _krw(n: int) -> str:
     return f"₩{n:,}"
+
+
+def _fmt_flight(f, role: str) -> str:
+    return (
+        f"- {role} {f.carrier} {f.flight_no}  "
+        f"{f.depart_airport} {f.depart_time:%m/%d %H:%M} → "
+        f"{f.arrive_airport} {f.arrive_time:%H:%M}  "
+        f"({'직항' if f.stops == 0 else f'{f.stops}경유'}, {f.duration_min}분)"
+    )
 
 
 def render_markdown(candidates: List[TripCandidate], budget_per_pax: int) -> str:
@@ -23,39 +39,40 @@ def render_markdown(candidates: List[TripCandidate], budget_per_pax: int) -> str
         return "\n".join(lines)
 
     for i, c in enumerate(candidates, 1):
-        f = c.flight
-        h = c.hotel
+        f, hk = c.flight, c.hk_hotel
         lines.append(f"## Rank {i}  ·  {_krw(c.cost_per_person_krw)}/인  ·  점수 {c.score:.3f}")
         lines.append("")
+        lines.append(f"- **시나리오**: {_SCENARIO_LABEL.get(c.scenario, c.scenario)}")
         lines.append(f"- 일정: **{c.arrival:%Y-%m-%d(%a)} 도착 → {c.return_date:%Y-%m-%d(%a)} 귀국** · {c.nights}박")
         lines.append("")
         lines.append("**✈ 항공편**")
-        lines.append(
-            f"- 출국 {f.outbound.carrier} {f.outbound.flight_no}  "
-            f"{f.outbound.depart_airport} {f.outbound.depart_time:%m/%d %H:%M} → "
-            f"{f.outbound.arrive_airport} {f.outbound.arrive_time:%H:%M}  "
-            f"({'직항' if f.outbound.stops == 0 else f'{f.outbound.stops}경유'}, {f.outbound.duration_min}분)"
-        )
-        lines.append(
-            f"- 귀국 {f.inbound.carrier} {f.inbound.flight_no}  "
-            f"{f.inbound.depart_airport} {f.inbound.depart_time:%m/%d %H:%M} → "
-            f"{f.inbound.arrive_airport} {f.inbound.arrive_time:%H:%M}  "
-            f"({'직항' if f.inbound.stops == 0 else f'{f.inbound.stops}경유'}, {f.inbound.duration_min}분)"
-        )
-        lines.append(f"- 항공 합계: {_krw(f.total_price_krw)} (4인)")
+        lines.append(_fmt_flight(f.outbound, "출국"))
+        lines.append(_fmt_flight(f.inbound, "귀국"))
+        lines.append(f"- 항공 합계: {_krw(f.total_price_krw)} ({c.pax}인)")
         lines.append("")
-        lines.append("**🏨 숙소**")
+        lines.append("**🏨 숙소 (HK)**")
         lines.append(
-            f"- {h.name}  {h.star:.1f}★  평점 {h.review_score:.1f}  "
-            f"· {h.district} · MTR {h.distance_to_mtr_m}m"
+            f"- {hk.name}  {hk.star:.1f}★  평점 {hk.review_score:.1f}  "
+            f"· {hk.district} · MTR {hk.distance_to_mtr_m}m"
         )
         lines.append(
-            f"- {_krw(h.price_per_room_per_night_krw)}/박/객실 × {c.nights}박 × {c.rooms}객실 "
-            f"= {_krw(c.hotel_cost_krw)}  ·  환불 {'가능' if h.refundable else '불가'}"
+            f"- {_krw(hk.price_per_room_per_night_krw)}/박/객실 × {c.hk_nights}박 × {c.rooms}객실 "
+            f"= {_krw(c.hk_hotel_cost_krw)}  ·  환불 {'가능' if hk.refundable else '불가'}"
         )
+        if c.macau_hotel:
+            mc = c.macau_hotel
+            lines.append("")
+            lines.append("**🏨 숙소 (마카오)**")
+            lines.append(
+                f"- {mc.name}  {mc.star:.1f}★  평점 {mc.review_score:.1f}  · {mc.district}"
+            )
+            lines.append(
+                f"- {_krw(mc.price_per_room_per_night_krw)}/박/객실 × {c.macau_nights}박 × {c.rooms}객실 "
+                f"= {_krw(c.macau_hotel_cost_krw)}  ·  환불 {'가능' if mc.refundable else '불가'}"
+            )
         lines.append("")
         lines.append("**🚢 부가**")
-        lines.append(f"- 마카오 페리·기타: {_krw(c.side_trip_cost_krw)}/인 × {c.pax} = {_krw(c.side_trip_cost_krw * c.pax)}")
+        lines.append(f"- 페리·세금 등: {_krw(c.side_trip_krw_per_pax)}/인 × {c.pax} = {_krw(c.side_trip_krw_per_pax * c.pax)}")
         lines.append("")
         lines.append(
             f"**합계**: {_krw(c.subtotal_krw)} + 환율버퍼 {c.fx_buffer_pct}% "
@@ -76,26 +93,32 @@ def write_csv(candidates: List[TripCandidate], path: Path) -> None:
     with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow([
-            "rank", "score", "cost_per_pax_krw", "total_krw",
-            "depart_date", "return_date",
-            "out_carrier", "out_no", "out_depart", "out_arrive", "out_stops",
-            "in_carrier", "in_no", "in_depart", "in_arrive", "in_stops",
+            "rank", "scenario", "score", "cost_per_pax_krw", "total_krw",
+            "arrival", "return",
+            "out_carrier", "out_no", "out_from", "out_to", "out_depart", "out_arrive", "out_stops",
+            "in_carrier", "in_no", "in_from", "in_to", "in_depart", "in_arrive", "in_stops",
             "flight_total_krw",
-            "hotel_name", "hotel_star", "hotel_score", "district",
-            "mtr_m", "hotel_total_krw", "refundable",
+            "hk_hotel", "hk_district", "hk_nights", "hk_total_krw",
+            "macau_hotel", "macau_nights", "macau_total_krw",
+            "side_trip_per_pax_krw",
         ])
         for i, c in enumerate(candidates, 1):
-            f, h = c.flight, c.hotel
+            f = c.flight
+            hk = c.hk_hotel
+            mc = c.macau_hotel
             w.writerow([
-                i, c.score, c.cost_per_person_krw, c.total_cost_krw,
+                i, c.scenario, c.score, c.cost_per_person_krw, c.total_cost_krw,
                 c.arrival.isoformat(), c.return_date.isoformat(),
                 f.outbound.carrier, f.outbound.flight_no,
+                f.outbound.depart_airport, f.outbound.arrive_airport,
                 f.outbound.depart_time.isoformat(), f.outbound.arrive_time.isoformat(),
                 f.outbound.stops,
                 f.inbound.carrier, f.inbound.flight_no,
+                f.inbound.depart_airport, f.inbound.arrive_airport,
                 f.inbound.depart_time.isoformat(), f.inbound.arrive_time.isoformat(),
                 f.inbound.stops,
                 f.total_price_krw,
-                h.name, h.star, h.review_score, h.district,
-                h.distance_to_mtr_m, c.hotel_cost_krw, h.refundable,
+                hk.name, hk.district, c.hk_nights, c.hk_hotel_cost_krw,
+                (mc.name if mc else ""), c.macau_nights, c.macau_hotel_cost_krw,
+                c.side_trip_krw_per_pax,
             ])

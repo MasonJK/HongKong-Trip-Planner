@@ -1,11 +1,11 @@
-"""후보 일자 생성 → 검색 → 필터링 → 조합 → 점수 → 랭킹."""
+"""후보 일자 생성 → 검색 → 시나리오 enum → 필터 → 조합 → 점수 → 랭킹."""
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
 from typing import Dict, List, Optional
 
 from .adapters.base import FlightAdapter, HotelAdapter
-from .models import FlightItinerary, Hotel, TripCandidate
+from .models import Flight, FlightItinerary, Hotel, TripCandidate
 
 
 _WEEKDAY_MAP = {
@@ -38,13 +38,11 @@ def parse_hhmm(s: str) -> time:
     return time(int(h), int(m))
 
 
-def flight_within_window(itin: FlightItinerary, earliest: time, latest: time) -> bool:
-    """출발편·귀국편 모두 출발/도착 시각이 허용 범위 안인지."""
-    for f in (itin.outbound, itin.inbound):
-        if f.depart_time.time() < earliest or f.depart_time.time() > latest:
-            return False
-        if f.arrive_time.time() < earliest or f.arrive_time.time() > latest:
-            return False
+def flight_in_window(f: Flight, earliest: time, latest: time) -> bool:
+    if f.depart_time.time() < earliest or f.depart_time.time() > latest:
+        return False
+    if f.arrive_time.time() < earliest or f.arrive_time.time() > latest:
+        return False
     return True
 
 
@@ -62,8 +60,8 @@ def score_candidates(candidates: List[TripCandidate], weights: Dict[str, float],
         return
     costs = [c.cost_per_person_krw for c in candidates]
     flight_hours = [c.flight.total_flight_hours for c in candidates]
-    hotel_scores = [c.hotel.review_score for c in candidates]
-    mtr_dists = [c.hotel.distance_to_mtr_m for c in candidates]
+    hotel_scores = [c.avg_review_score for c in candidates]
+    mtr_dists = [c.hk_hotel.distance_to_mtr_m for c in candidates]
 
     c_lo, c_hi = min(costs), max(costs)
     f_lo, f_hi = min(flight_hours), max(flight_hours)
@@ -71,13 +69,17 @@ def score_candidates(candidates: List[TripCandidate], weights: Dict[str, float],
     m_lo, m_hi = min(mtr_dists), max(mtr_dists)
 
     for c in candidates:
-        s_cost = _norm(c.cost_per_person_krw, c_lo, c_hi, invert=True)  # 쌀수록 좋음
-        s_ft = _norm(c.flight.total_flight_hours, f_lo, f_hi, invert=True)  # 짧을수록 좋음
-        s_hs = _norm(c.hotel.review_score, h_lo, h_hi)  # 높을수록 좋음
-        s_loc_district = 1.0 if c.hotel.district in preferred_districts else 0.3
-        s_loc_mtr = _norm(c.hotel.distance_to_mtr_m, m_lo, m_hi, invert=True)
+        s_cost = _norm(c.cost_per_person_krw, c_lo, c_hi, invert=True)
+        s_ft = _norm(c.flight.total_flight_hours, f_lo, f_hi, invert=True)
+        s_hs = _norm(c.avg_review_score, h_lo, h_hi)
+        s_loc_district = 1.0 if c.hk_hotel.district in preferred_districts else 0.3
+        s_loc_mtr = _norm(c.hk_hotel.distance_to_mtr_m, m_lo, m_hi, invert=True)
         s_loc = (s_loc_district + s_loc_mtr) / 2
-        s_flex = 1.0 if c.hotel.refundable else 0.0
+        # 환불 유연성: HK + (있다면) 마카오 모두 환불 가능해야 1.0
+        flex_parts = [c.hk_hotel.refundable]
+        if c.macau_hotel:
+            flex_parts.append(c.macau_hotel.refundable)
+        s_flex = 1.0 if all(flex_parts) else 0.0
 
         score = (
             weights.get("cost", 0) * s_cost
@@ -96,24 +98,58 @@ def score_candidates(candidates: List[TripCandidate], weights: Dict[str, float],
         }
 
 
+# ---- 항공편 조합 헬퍼 -----------------------------------------------------
+
+def _filter_and_trim(flights: List[Flight], earliest: time, latest: time, top_k: int) -> List[Flight]:
+    flights = [f for f in flights if flight_in_window(f, earliest, latest)]
+    flights = flights[:top_k]
+    return flights
+
+
+def _pair(out_list: List[Flight], in_list: List[Flight], pax: int) -> List[FlightItinerary]:
+    pairs: List[FlightItinerary] = []
+    for o in out_list:
+        for i in in_list:
+            pairs.append(FlightItinerary(outbound=o, inbound=i, pax=pax))
+    return pairs
+
+
+# ---- 메인 ----------------------------------------------------------------
+
 def optimize(config: Dict, flight_adapter: FlightAdapter, hotel_adapter: HotelAdapter) -> List[TripCandidate]:
     trip = config["trip"]
     fly_cfg = config["flight"]
     hotel_cfg = config["hotel"]
     rank_cfg = config["ranking"]
+    macau_cfg = config.get("macau") or {}
 
     origin = trip["origin"]
-    destination = trip["destination"]
+    destination = trip["destination"]    # HKG
+    macau_iata = macau_cfg.get("airport", "MFM")
     nights = trip["nights"]
     pax = trip["travelers"]["adults"]
     budget = trip["budget_per_person_krw"]
     rooms = hotel_cfg["rooms"]
+    max_stops = fly_cfg["max_stops"]
 
-    side_per_pax = sum(s.get("cost_per_person_krw", 0) for s in config.get("side_trips", []))
     fx_buffer = config.get("fx_buffer_pct", 0)
-
     earliest = parse_hhmm(fly_cfg["earliest_departure"])
     latest = parse_hhmm(fly_cfg["latest_arrival"])
+    top_k_flight = fly_cfg.get("top_k_per_date", 5)
+    top_k_hotel = hotel_cfg.get("top_k_per_date", 5)
+
+    scenarios = macau_cfg.get("scenarios", {}) or {}
+    do_day_trip = scenarios.get("day_trip", True)
+    do_overnight_rt = scenarios.get("overnight_rt", False)
+    do_overnight_mfm_out = scenarios.get("overnight_mfm_out", False)
+
+    ferry_rt = int(macau_cfg.get("ferry_round_trip_krw_per_pax", 50000))
+    ferry_ow = int(macau_cfg.get("ferry_one_way_krw_per_pax", 28000))
+
+    macau_hotel_cfg = macau_cfg.get("hotel", {}) or {}
+    macau_min_score = float(macau_hotel_cfg.get("min_review_score", 7.5))
+    macau_top_k = int(macau_hotel_cfg.get("top_k_per_date", 3))
+    macau_overnight_used = do_overnight_rt or do_overnight_mfm_out
 
     arrival_dates = generate_candidate_dates(
         date.fromisoformat(str(trip["date_range"]["start"])),
@@ -126,32 +162,92 @@ def optimize(config: Dict, flight_adapter: FlightAdapter, hotel_adapter: HotelAd
     for arrival in arrival_dates:
         return_ = arrival + timedelta(days=nights)
 
-        flights = flight_adapter.search(
-            origin, destination, arrival, return_, pax, fly_cfg["max_stops"]
+        # 항공: HKG↔HKG는 모든 시나리오에서 사용 가능. MFM 귀국은 시나리오 C에서만.
+        out_hkg = _filter_and_trim(
+            flight_adapter.search_oneway(origin, destination, arrival, pax, max_stops),
+            earliest, latest, top_k_flight,
         )
-        flights = [f for f in flights if flight_within_window(f, earliest, latest)]
-        flights = flights[: fly_cfg.get("top_k_per_date", 5)]
+        in_hkg = _filter_and_trim(
+            flight_adapter.search_oneway(destination, origin, return_, pax, max_stops),
+            earliest, latest, top_k_flight,
+        )
+        in_mfm = []
+        if do_overnight_mfm_out:
+            in_mfm = _filter_and_trim(
+                flight_adapter.search_oneway(macau_iata, origin, return_, pax, max_stops),
+                earliest, latest, top_k_flight,
+            )
 
-        hotels = hotel_adapter.search("Hong Kong", arrival, return_, rooms, pax)
-        hotels = [h for h in hotels if h.review_score >= hotel_cfg["min_review_score"]]
-        hotels = hotels[: hotel_cfg.get("top_k_per_date", 5)]
+        if not out_hkg or (not in_hkg and not in_mfm):
+            continue
 
-        for f in flights:
-            for h in hotels:
-                cand = TripCandidate(
-                    arrival=arrival,
-                    return_date=return_,
-                    nights=nights,
-                    pax=pax,
-                    flight=f,
-                    hotel=h,
-                    rooms=rooms,
-                    side_trip_cost_krw=side_per_pax,
-                    fx_buffer_pct=fx_buffer,
-                )
-                if cand.cost_per_person_krw > budget:
-                    continue
-                candidates.append(cand)
+        # 호텔
+        hk_hotels = hotel_adapter.search("Hong Kong", arrival, return_, rooms, pax)
+        hk_hotels = [h for h in hk_hotels if h.review_score >= hotel_cfg["min_review_score"]]
+        hk_hotels = hk_hotels[:top_k_hotel]
+        if not hk_hotels:
+            continue
+
+        macau_hotels: List[Hotel] = []
+        if macau_overnight_used:
+            # 마카오에서는 마지막 박만 (= 귀국 전날 체크인)
+            mc_in = return_ - timedelta(days=1)
+            mc_out = return_
+            macau_hotels = hotel_adapter.search("Macau", mc_in, mc_out, rooms, pax)
+            macau_hotels = [h for h in macau_hotels if h.review_score >= macau_min_score]
+            macau_hotels = macau_hotels[:macau_top_k]
+
+        # --- A: day_trip (HKG↔HKG, 4박 HK, 마카오 페리 왕복 당일치기) ---
+        if do_day_trip and in_hkg:
+            for itin in _pair(out_hkg, in_hkg, pax):
+                for h in hk_hotels:
+                    cand = TripCandidate(
+                        arrival=arrival, return_date=return_,
+                        nights=nights, pax=pax, rooms=rooms,
+                        flight=itin,
+                        hk_hotel=h, hk_nights=nights,
+                        side_trip_krw_per_pax=ferry_rt,
+                        fx_buffer_pct=fx_buffer,
+                        scenario="day_trip",
+                    )
+                    if cand.cost_per_person_krw <= budget:
+                        candidates.append(cand)
+
+        # --- B: overnight_rt ((N-1)박 HK + 1박 Macau, HKG↔HKG, 페리 왕복) ---
+        if do_overnight_rt and in_hkg and macau_hotels and nights >= 2:
+            for itin in _pair(out_hkg, in_hkg, pax):
+                for hk in hk_hotels:
+                    for mc in macau_hotels:
+                        cand = TripCandidate(
+                            arrival=arrival, return_date=return_,
+                            nights=nights, pax=pax, rooms=rooms,
+                            flight=itin,
+                            hk_hotel=hk, hk_nights=nights - 1,
+                            macau_hotel=mc, macau_nights=1,
+                            side_trip_krw_per_pax=ferry_rt,
+                            fx_buffer_pct=fx_buffer,
+                            scenario="overnight_rt",
+                        )
+                        if cand.cost_per_person_krw <= budget:
+                            candidates.append(cand)
+
+        # --- C: overnight_mfm_out ((N-1)박 HK + 1박 Macau, ICN→HKG / MFM→ICN, 페리 편도) ---
+        if do_overnight_mfm_out and in_mfm and macau_hotels and nights >= 2:
+            for itin in _pair(out_hkg, in_mfm, pax):
+                for hk in hk_hotels:
+                    for mc in macau_hotels:
+                        cand = TripCandidate(
+                            arrival=arrival, return_date=return_,
+                            nights=nights, pax=pax, rooms=rooms,
+                            flight=itin,
+                            hk_hotel=hk, hk_nights=nights - 1,
+                            macau_hotel=mc, macau_nights=1,
+                            side_trip_krw_per_pax=ferry_ow,
+                            fx_buffer_pct=fx_buffer,
+                            scenario="overnight_mfm_out",
+                        )
+                        if cand.cost_per_person_krw <= budget:
+                            candidates.append(cand)
 
     score_candidates(candidates, rank_cfg["weights"], hotel_cfg["preferred_districts"])
     candidates.sort(key=lambda c: c.score, reverse=True)

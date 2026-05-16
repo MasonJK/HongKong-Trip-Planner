@@ -14,9 +14,9 @@ trip:
 flight:
   cabin: economy
   max_stops: 1
-  earliest_departure: "06:00"   # 출/도착 모두 적용
+  earliest_departure: "06:00"
   latest_arrival:    "23:30"
-  preferred_carriers: []   # (현재 미사용, 향후 필터/점수 연동 예정)
+  preferred_carriers: []      # 현재 미사용 (필터/점수 미연동)
   top_k_per_date: 5
 
 hotel:
@@ -29,12 +29,21 @@ hotel:
   rooms: 2          # 4명 = 2인실 2개
   top_k_per_date: 5
 
-side_trips:
-  - name: macau_day_trip
-    on_day: 3
-    cost_per_person_krw: 50000   # 페리 왕복 + 입국세 환산
+macau:
+  airport: MFM
+  # 페리 비용 (1인당)
+  ferry_round_trip_krw_per_pax: 50000
+  ferry_one_way_krw_per_pax:    28000
+  # 시나리오 토글 — 옵티마이저가 활성화된 시나리오를 모두 후보로 만들어 점수 비교
+  scenarios:
+    day_trip:          true    # A: 4박 HK + 마카오 당일치기
+    overnight_rt:      true    # B: 3박 HK + 1박 마카오, HKG↔HKG, 페리 왕복
+    overnight_mfm_out: true    # C: 3박 HK + 1박 마카오, ICN→HKG 입국 / MFM→ICN 귀국
+  hotel:
+    min_review_score: 7.5
+    top_k_per_date: 3
 
-# 제외할 날짜 (가격 급등 등)
+# 제외할 날짜
 exclude_date_ranges:
   - { start: 2026-10-01, end: 2026-10-06, reason: "중국 국경절" }
   - { start: 2026-10-17, end: 2026-10-19, reason: "중양절 (HK 공휴일)" }
@@ -49,6 +58,7 @@ ranking:
   top_n: 10
 
 # mock: 내장 모의 데이터로 즉시 실행
-# playwright: 실제 사이트 크롤링 (별도 구현 필요)
+# serpapi: Google Flights/Hotels (.env에 SERPAPI_KEY 필요)
+# playwright: 사이트 크롤링 (셀렉터 직접 구현 필요)
 adapter: mock
 fx_buffer_pct: 3        # 환율·수수료 버퍼

@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import date
 from typing import List
 
-from ..models import FlightItinerary, Hotel
+from ..models import Flight, Hotel
 from .base import FlightAdapter, HotelAdapter
 
 
@@ -22,7 +22,7 @@ class PlaywrightFlightAdapter(FlightAdapter):
         self.headless = headless
         self.delay_sec = delay_sec
 
-    def search(self, origin, destination, depart, return_, pax, max_stops) -> List[FlightItinerary]:
+    def search_oneway(self, origin, destination, when, pax, max_stops) -> List[Flight]:
         # from playwright.sync_api import sync_playwright
         # with sync_playwright() as p:
         #     browser = p.chromium.launch(headless=self.headless)

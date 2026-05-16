@@ -14,6 +14,7 @@ trip:
 flight:
   cabin: economy
   max_stops: 1
+  max_duration_min: 900       # 단편당 15시간. 너무 긴 layover 제거 (예: 1455분 마닐라 경유)
   earliest_departure: "06:00"
   latest_arrival:    "23:30"
   preferred_carriers: []      # 현재 미사용 (필터/점수 미연동)

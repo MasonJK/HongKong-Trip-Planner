@@ -38,10 +38,13 @@ def parse_hhmm(s: str) -> time:
     return time(int(h), int(m))
 
 
-def flight_in_window(f: Flight, earliest: time, latest: time) -> bool:
+def flight_in_window(f: Flight, earliest: time, latest: time,
+                     max_duration_min: Optional[int] = None) -> bool:
     if f.depart_time.time() < earliest or f.depart_time.time() > latest:
         return False
     if f.arrive_time.time() < earliest or f.arrive_time.time() > latest:
+        return False
+    if max_duration_min is not None and f.duration_min > max_duration_min:
         return False
     return True
 
@@ -100,8 +103,9 @@ def score_candidates(candidates: List[TripCandidate], weights: Dict[str, float],
 
 # ---- 항공편 조합 헬퍼 -----------------------------------------------------
 
-def _filter_and_trim(flights: List[Flight], earliest: time, latest: time, top_k: int) -> List[Flight]:
-    flights = [f for f in flights if flight_in_window(f, earliest, latest)]
+def _filter_and_trim(flights: List[Flight], earliest: time, latest: time, top_k: int,
+                     max_duration_min: Optional[int] = None) -> List[Flight]:
+    flights = [f for f in flights if flight_in_window(f, earliest, latest, max_duration_min)]
     flights = flights[:top_k]
     return flights
 
@@ -135,6 +139,7 @@ def optimize(config: Dict, flight_adapter: FlightAdapter, hotel_adapter: HotelAd
     fx_buffer = config.get("fx_buffer_pct", 0)
     earliest = parse_hhmm(fly_cfg["earliest_departure"])
     latest = parse_hhmm(fly_cfg["latest_arrival"])
+    max_dur = fly_cfg.get("max_duration_min")
     top_k_flight = fly_cfg.get("top_k_per_date", 5)
     top_k_hotel = hotel_cfg.get("top_k_per_date", 5)
 
@@ -165,17 +170,17 @@ def optimize(config: Dict, flight_adapter: FlightAdapter, hotel_adapter: HotelAd
         # 항공: HKG↔HKG는 모든 시나리오에서 사용 가능. MFM 귀국은 시나리오 C에서만.
         out_hkg = _filter_and_trim(
             flight_adapter.search_oneway(origin, destination, arrival, pax, max_stops),
-            earliest, latest, top_k_flight,
+            earliest, latest, top_k_flight, max_dur,
         )
         in_hkg = _filter_and_trim(
             flight_adapter.search_oneway(destination, origin, return_, pax, max_stops),
-            earliest, latest, top_k_flight,
+            earliest, latest, top_k_flight, max_dur,
         )
         in_mfm = []
         if do_overnight_mfm_out:
             in_mfm = _filter_and_trim(
                 flight_adapter.search_oneway(macau_iata, origin, return_, pax, max_stops),
-                earliest, latest, top_k_flight,
+                earliest, latest, top_k_flight, max_dur,
             )
 
         if not out_hkg or (not in_hkg and not in_mfm):

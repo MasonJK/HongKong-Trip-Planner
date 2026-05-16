@@ -1,0 +1,9 @@
+Add flight.max_duration_min filter
+
+Time-of-day window alone allowed flights like 5J ICN-HKG via MNL
+(1455 min = 24h15m) to pass and even rank first by cost despite the
+brutal duration. Add an explicit cap (default 900 min = 15h) applied
+in flight_in_window() so unreasonably long itineraries get filtered
+before scoring.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>

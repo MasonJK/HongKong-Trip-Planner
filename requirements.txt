@@ -1,3 +1,6 @@
 PyYAML>=6.0
-# 실 운영 시:
-# playwright>=1.40
+
+# 보고서 (make_report.py)에서 사용
+staticmap>=0.5.4
+python-pptx>=0.6.21
+Pillow>=10.0

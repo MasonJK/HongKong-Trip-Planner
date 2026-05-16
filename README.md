@@ -36,6 +36,19 @@ adapter: serpapi    # mock → serpapi
 python -m trip_optimizer.main --config trip_optimizer/config.yaml --out results
 ```
 
+## 보고서 (PPT + 지도)
+
+```bash
+pip install staticmap python-pptx Pillow
+python make_report.py
+```
+
+`results/results.csv` (옵티마이저 출력) + `cache.db` (SerpAPI 캐시)를 읽어:
+- `results/hotels_map.png` — Top 7 호텔이 표시된 OSM 지도 (마커 1~7 + 1박 가격)
+- `results/trip_report.pptx` — 4슬라이드 보고서 (Top 3 일정 / 호텔 지도 / 결정 참고사항)
+
+지도는 평점 ≥8.0(부족시 7.5) + district != Other(도심권만) 필터 후 가성비·평점·위치 가중 점수로 Top 7 선정.
+
 ## 마카오 시나리오
 
 `config.yaml`의 `macau:` 블록으로 켜고 끔:

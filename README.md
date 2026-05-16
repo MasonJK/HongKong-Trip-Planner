@@ -59,8 +59,7 @@ trip_optimizer/
 └── adapters/
     ├── base.py             # 추상 인터페이스
     ├── mock.py             # 모의 데이터 (즉시 실행용)
-    ├── serpapi.py          # ★ SerpAPI 실제 데이터
-    └── playwright_skel.py  # 스크래핑 대안 (직접 구현 필요)
+    └── serpapi.py          # ★ SerpAPI 실제 데이터
 ```
 
 ## 한계와 주의

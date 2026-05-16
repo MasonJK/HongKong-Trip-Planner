@@ -11,7 +11,7 @@
     SerpAPI의 round-trip은 departure_token 기반 2단계 호출이 필요해 호출수가 많아지므로
     편도 × 2 방식이 호출수·시간창 필터링·매칭 자유도 모두 유리.
   - 호텔: Google Hotels 검색. 가격은 (rooms × nights) 합산이므로 1박/객실 단가로 환산.
-  - 같은 요청은 SQLite 캐시(12h TTL)로 재사용 → 무료 한도(100/월) 보호.
+  - 같은 요청은 SQLite 캐시(12h TTL)로 재사용 → 무료 한도(250/월) 보호.
 """
 from __future__ import annotations
 
@@ -157,11 +157,21 @@ def _parse_dt(s: str) -> datetime:
     return datetime.strptime(s, "%Y-%m-%d %H:%M")
 
 
-def _build_oneway_flight(item: Dict) -> Optional[Flight]:
-    """SerpAPI Google Flights 결과 1개 → 출발-도착을 1편으로 표현 (경유 시 첫·마지막 segment)."""
+def _build_oneway_flight(item: Dict, pax: int) -> Optional[Flight]:
+    """SerpAPI Google Flights 결과 1개 → Flight.
+
+    경유 시: 출발=첫 segment, 도착=마지막 segment, 중간 정보는 stops 카운트로만 보존.
+    SerpAPI는 일부 항공편(LCC·코드셰어 등)에 가격을 안 줌 — 이 경우 None 반환해서 후보에서 제외.
+    """
     legs = item.get("flights", [])
     if not legs:
         return None
+
+    raw_price = item.get("price")
+    if not raw_price:   # None, 0, 빈 문자열 모두 제외
+        return None
+    per_pax = int(raw_price) // max(pax, 1)
+
     first, last = legs[0], legs[-1]
     try:
         dep_dt = _parse_dt(first["departure_airport"]["time"])
@@ -173,16 +183,20 @@ def _build_oneway_flight(item: Dict) -> Optional[Flight]:
     if total_dur == 0:
         total_dur = max(1, int((arr_dt - dep_dt).total_seconds() // 60))
 
+    # IATA carrier 코드는 flight_number의 prefix에 있음 ('KE 2005' → 'KE').
+    fn = (first.get("flight_number") or "").strip()
+    iata = fn.split()[0].upper() if fn else "??"
+
     return Flight(
-        carrier=first.get("airline", "")[:2].upper() or "??",
-        flight_no=first.get("flight_number") or "?",
+        carrier=iata,
+        flight_no=fn or "?",
         depart_airport=first["departure_airport"].get("id", ""),
         arrive_airport=last["arrival_airport"].get("id", ""),
         depart_time=dep_dt,
         arrive_time=arr_dt,
         stops=max(0, len(legs) - 1),
         duration_min=total_dur,
-        price_krw_per_pax=int(item.get("price") or 0),
+        price_krw_per_pax=per_pax,
     )
 
 
@@ -215,7 +229,7 @@ class SerpApiFlightAdapter(FlightAdapter):
         data = _api_get(params, cache=self.cache)
         flights: List[Flight] = []
         for item in (data.get("best_flights") or []) + (data.get("other_flights") or []):
-            f = _build_oneway_flight(item)
+            f = _build_oneway_flight(item, pax)
             if f and f.stops <= max_stops:
                 flights.append(f)
         flights.sort(key=lambda f: f.price_krw_per_pax)
@@ -224,27 +238,77 @@ class SerpApiFlightAdapter(FlightAdapter):
 
 # ---- Hotel ---------------------------------------------------------------
 
-# 검색 키워드 → 우리 모델의 district 라벨 매핑
+# District 중심 좌표 (HK 주요 지역 + 마카오)
+_HK_DISTRICT_CENTERS = {
+    "Tsim Sha Tsui": (22.2987, 114.1722),
+    "Causeway Bay":  (22.2803, 114.1830),
+    "Central":       (22.2820, 114.1582),
+    "Mongkok":       (22.3193, 114.1694),
+    "Jordan":        (22.3049, 114.1722),
+    "Wan Chai":      (22.2774, 114.1716),
+}
+_MACAU_DISTRICT_CENTERS = {
+    "Cotai":           (22.1458, 113.5600),
+    "Macau Peninsula": (22.1965, 113.5414),
+}
+
+# 이름 기반 fallback (좌표가 없거나 모든 중심에서 멀 때)
 _HK_AREA_HINTS = [
-    ("Tsim Sha Tsui", ["TSIM SHA TSUI", "TST"]),
-    ("Causeway Bay",  ["CAUSEWAY BAY", "CWB"]),
-    ("Central",       ["CENTRAL"]),
-    ("Mongkok",       ["MONGKOK", "MONG KOK"]),
-    ("Jordan",        ["JORDAN"]),
-    ("Wan Chai",      ["WAN CHAI", "WANCHAI"]),
+    ("Tsim Sha Tsui", ["TSIM SHA TSUI", "TST", "尖沙咀"]),
+    ("Causeway Bay",  ["CAUSEWAY BAY", "CWB", "銅鑼灣"]),
+    ("Central",       ["CENTRAL", "中環"]),
+    ("Mongkok",       ["MONGKOK", "MONG KOK", "旺角"]),
+    ("Jordan",        ["JORDAN", "佐敦"]),
+    ("Wan Chai",      ["WAN CHAI", "WANCHAI", "灣仔"]),
 ]
 _MACAU_AREA_HINTS = [
-    ("Cotai",            ["COTAI", "TAIPA"]),
+    ("Cotai",            ["COTAI", "TAIPA", "路氹"]),
     ("Macau Peninsula",  ["MACAU PENINSULA", "PENINSULA"]),
 ]
 
 
-def _infer_district(name: str, address: str, hints) -> str:
+def _district_from_gps(lat: float, lon: float, centers: Dict[str, Tuple[float, float]],
+                       max_km: float = 2.0) -> Optional[str]:
+    """가장 가까운 중심을 찾아 max_km 이내면 그 이름 반환, 아니면 None.
+    홍콩 스케일에서는 평면 근사로 충분 (위도 22°에서 cos(lat) ≈ 0.927).
+    """
+    import math
+    best_name, best_d = None, float("inf")
+    cos_lat = math.cos(math.radians(lat))
+    for name, (clat, clon) in centers.items():
+        dx = (lon - clon) * cos_lat * 111.0   # km
+        dy = (lat - clat) * 111.0
+        d = math.hypot(dx, dy)
+        if d < best_d:
+            best_name, best_d = name, d
+    return best_name if best_d <= max_km else None
+
+
+def _infer_district(name: str, address: str, hints) -> Optional[str]:
     text = f"{name} {address}".upper()
     for label, keys in hints:
-        if any(k in text for k in keys):
+        if any(k.upper() in text for k in keys):
             return label
-    return "Other"
+    return None
+
+
+def _resolve_district(prop: Dict, is_macau: bool) -> str:
+    centers = _MACAU_DISTRICT_CENTERS if is_macau else _HK_DISTRICT_CENTERS
+    hints = _MACAU_AREA_HINTS if is_macau else _HK_AREA_HINTS
+
+    gps = prop.get("gps_coordinates") or {}
+    lat = gps.get("latitude")
+    lon = gps.get("longitude")
+    if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+        d = _district_from_gps(float(lat), float(lon), centers)
+        if d:
+            return d
+
+    # GPS가 없거나 중심에서 멀면 이름 기반 fallback
+    name = prop.get("name") or ""
+    addr = prop.get("address") or ""
+    d = _infer_district(name, addr, hints)
+    return d or "Other"
 
 
 def _hotel_class_to_star(s) -> float:
@@ -287,15 +351,14 @@ class SerpApiHotelAdapter(HotelAdapter):
         }
         data = _api_get(params, cache=self.cache)
         props = data.get("properties") or []
-
-        hints = _MACAU_AREA_HINTS if "macau" in city.lower() else _HK_AREA_HINTS
+        is_macau = "macau" in city.lower()
 
         results: List[Hotel] = []
         for p in props[: self.top_k]:
             name = p.get("name") or "Unknown"
             star = _hotel_class_to_star(p.get("extracted_hotel_class") or p.get("hotel_class"))
             score = float(p.get("overall_rating") or 0)
-            # Google는 0~5 스케일을 자주 씀. 8.0 미만이면 ×2 (10점 환산).
+            # Google는 0~5 스케일을 자주 씀. 5.0 이하면 ×2 (10점 환산).
             if 0 < score <= 5:
                 score = round(score * 2.0, 1)
 
@@ -310,8 +373,7 @@ class SerpApiHotelAdapter(HotelAdapter):
             else:
                 continue  # 가격 없는 결과는 스킵
 
-            address = p.get("address") or ""
-            district = _infer_district(name, address, hints)
+            district = _resolve_district(p, is_macau)
 
             # MTR/지하철 거리 정보 없음 — 기본값.
             results.append(Hotel(

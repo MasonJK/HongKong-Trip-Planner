@@ -1,4 +1,4 @@
-"""검색 어댑터 추상 기반. Mock·SerpAPI·Playwright 등으로 갈아끼울 수 있게."""
+"""검색 어댑터 추상 기반. Mock(테스트용) · SerpAPI(실데이터)."""
 from abc import ABC, abstractmethod
 from datetime import date
 from typing import List

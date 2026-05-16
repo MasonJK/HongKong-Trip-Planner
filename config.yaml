@@ -58,7 +58,6 @@ ranking:
   top_n: 10
 
 # mock: 내장 모의 데이터로 즉시 실행
-# serpapi: Google Flights/Hotels (.env에 SERPAPI_KEY 필요)
-# playwright: 사이트 크롤링 (셀렉터 직접 구현 필요)
+# serpapi: Google Flights/Hotels (.env 또는 env/serp_api.env에 키 필요)
 adapter: mock
 fx_buffer_pct: 3        # 환율·수수료 버퍼

@@ -36,9 +36,6 @@ def load_adapters(name: str):
     if name == "serpapi":
         from .adapters.serpapi import SerpApiFlightAdapter, SerpApiHotelAdapter
         return SerpApiFlightAdapter(), SerpApiHotelAdapter()
-    if name == "playwright":
-        from .adapters.playwright_skel import PlaywrightFlightAdapter, PlaywrightHotelAdapter
-        return PlaywrightFlightAdapter(), PlaywrightHotelAdapter()
     raise ValueError(f"Unknown adapter: {name}")
 
 

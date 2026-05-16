@@ -174,7 +174,7 @@ _PALETTE = [
 
 
 def render_map(hotels: List[HotelRec], out_png: Path,
-               width: int = 1400, height: int = 900) -> None:
+               width: int = 2000, height: int = 1400) -> None:
     # 호텔 분포에 약간의 패딩만 줘서 타이트하게
     lats = [h.lat for h in hotels]
     lons = [h.lon for h in hotels]
@@ -183,7 +183,7 @@ def render_map(hotels: List[HotelRec], out_png: Path,
     bbox = (min(lons) - lon_pad, min(lats) - lat_pad,
             max(lons) + lon_pad, max(lats) + lat_pad)
 
-    m = StaticMap(width, height, padding_x=20, padding_y=20,
+    m = StaticMap(width, height, padding_x=60, padding_y=60,
                   url_template="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
                   headers={"User-Agent": "trip-optimizer/0.3"})
     # bbox 강제용 corner marker (투명)
@@ -191,14 +191,14 @@ def render_map(hotels: List[HotelRec], out_png: Path,
     m.add_marker(CircleMarker((bbox[2], bbox[3]), "#00000000", 1))
     for i, h in enumerate(hotels):
         color = _PALETTE[i % len(_PALETTE)]
-        m.add_marker(CircleMarker((h.lon, h.lat), "white", 36))
-        m.add_marker(CircleMarker((h.lon, h.lat), color, 30))
+        m.add_marker(CircleMarker((h.lon, h.lat), "white", 56))
+        m.add_marker(CircleMarker((h.lon, h.lat), color, 46))
     img = m.render()
 
     # 마커에 번호 표시
     draw = ImageDraw.Draw(img)
-    font_num = _try_font(26)
-    font_lbl = _try_font(18)
+    font_num = _try_font(40)
+    font_lbl = _try_font(32)
 
     # staticmap 내부 좌표 변환 함수를 직접 못 써서, 픽셀 계산을 다시 함
     def lonlat_to_xy(lon, lat):
@@ -212,22 +212,52 @@ def render_map(hotels: List[HotelRec], out_png: Path,
         py = y - (m.y_center * 256 - height / 2)
         return int(px), int(py)
 
+    # 마커 위치 미리 계산 + 겹침 해소를 위해 가까운 마커끼리는 라벨 방향 분산
+    positions = [lonlat_to_xy(h.lon, h.lat) for h in hotels]
+
+    def label_offset(i: int) -> tuple:
+        """근처에 다른 마커가 있으면 라벨을 위/아래/좌/우로 분산."""
+        px, py = positions[i]
+        # 동/서/북/남/북동/북서 6방향
+        dirs = [
+            (66, -22),    # 동
+            (-66, -22),   # 서 (라벨 폭만큼 더 왼쪽으로 빼야 함 → 텍스트 그릴 때 처리)
+            (0, -82),     # 북
+            (0, 60),      # 남
+            (66, -82),    # 북동
+            (-66, 60),    # 남서
+        ]
+        # 가장 가까운 다른 마커와의 거리로 방향 선택 (단순 라운드로빈)
+        return dirs[i % len(dirs)]
+
     for i, h in enumerate(hotels):
-        px, py = lonlat_to_xy(h.lon, h.lat)
+        px, py = positions[i]
         label = str(i + 1)
         bbox = draw.textbbox((0, 0), label, font=font_num)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        draw.text((px - tw // 2, py - th // 2 - 2), label, fill="white", font=font_num)
+        draw.text((px - tw // 2, py - th // 2 - 4), label, fill="white", font=font_num)
 
-        # 가격 라벨 (마커 옆에) — ASCII만 (한글/원화 폰트 호환성 회피)
+        # 가격 박스 (마커 주변 여러 방향으로 분산)
         price_text = f"KRW {h.price_per_night // 1000}k"
         bbox = draw.textbbox((0, 0), price_text, font=font_lbl)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        x0, y0 = px + 34, py - th // 2 - 4
-        # 흰 외곽 + 검은 배경
-        draw.rectangle((x0 - 6, y0 - 4, x0 + tw + 6, y0 + th + 4),
-                       fill=(0, 0, 0, 220), outline="white", width=2)
-        draw.text((x0, y0), price_text, fill="white", font=font_lbl)
+        ox, oy = label_offset(i)
+        # 서/남서 방향은 라벨 너비만큼 왼쪽 보정
+        if ox < 0:
+            x0 = px + ox - tw
+        else:
+            x0 = px + ox
+        y0 = py + oy
+        pad_x, pad_y = 14, 10
+        # 흰 박스 + 굵은 검은 외곽 + 색상 매칭 좌측 바
+        color = _PALETTE[i % len(_PALETTE)]
+        rr, gg, bb = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+        box_rect = (x0 - pad_x, y0 - pad_y, x0 + tw + pad_x, y0 + th + pad_y)
+        draw.rectangle(box_rect, fill="white", outline="black", width=3)
+        # 좌측 색상 바 (마커 색과 매칭)
+        draw.rectangle((box_rect[0], box_rect[1], box_rect[0] + 8, box_rect[3]),
+                       fill=(rr, gg, bb))
+        draw.text((x0, y0), price_text, fill="black", font=font_lbl)
 
     img.save(out_png)
 

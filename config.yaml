@@ -1,0 +1,53 @@
+# 홍콩 여행 최적화 설정
+trip:
+  origin: ICN
+  destination: HKG
+  arrival_day_of_week: sunday
+  nights: 4
+  date_range:
+    start: 2026-10-01
+    end:   2026-11-30
+  travelers:
+    adults: 4
+  budget_per_person_krw: 1500000
+
+flight:
+  cabin: economy
+  max_stops: 1
+  earliest_departure: "06:00"   # 출/도착 모두 적용
+  latest_arrival:    "23:30"
+  preferred_carriers: [KE, OZ, CX, HX]
+  top_k_per_date: 5
+
+hotel:
+  min_review_score: 8.0
+  preferred_districts:
+    - Tsim Sha Tsui
+    - Central
+    - Causeway Bay
+    - Jordan
+  rooms: 2          # 4명 = 2인실 2개
+  top_k_per_date: 5
+
+side_trips:
+  - name: macau_day_trip
+    on_day: 3
+    cost_per_person_krw: 50000   # 페리 왕복 + 입국세 환산
+
+# 제외할 날짜 (가격 급등 등)
+exclude_date_ranges:
+  - { start: 2026-10-01, end: 2026-10-06, reason: "중국 국경절" }
+
+ranking:
+  weights:
+    cost: 0.55
+    flight_time: 0.15
+    hotel_score: 0.15
+    location: 0.10
+    cancel_flex: 0.05
+  top_n: 10
+
+# mock: 내장 모의 데이터로 즉시 실행
+# playwright: 실제 사이트 크롤링 (별도 구현 필요)
+adapter: mock
+fx_buffer_pct: 3        # 환율·수수료 버퍼

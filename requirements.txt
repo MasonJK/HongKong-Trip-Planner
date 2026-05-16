@@ -1,0 +1,3 @@
+PyYAML>=6.0
+# 실 운영 시:
+# playwright>=1.40

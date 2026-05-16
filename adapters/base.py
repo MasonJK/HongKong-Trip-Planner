@@ -1,22 +1,23 @@
-"""검색 어댑터 추상 기반. Mock·Playwright·Amadeus 등으로 갈아끼울 수 있게."""
+"""검색 어댑터 추상 기반. Mock·SerpAPI·Playwright 등으로 갈아끼울 수 있게."""
 from abc import ABC, abstractmethod
 from datetime import date
 from typing import List
 
-from ..models import FlightItinerary, Hotel
+from ..models import Flight, Hotel
 
 
 class FlightAdapter(ABC):
+    """편도 단일 leg 검색. 옵티마이저가 outbound × inbound로 조합."""
+
     @abstractmethod
-    def search(
+    def search_oneway(
         self,
         origin: str,
         destination: str,
-        depart: date,
-        return_: date,
+        when: date,
         pax: int,
         max_stops: int,
-    ) -> List[FlightItinerary]:
+    ) -> List[Flight]:
         ...
 
 

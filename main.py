@@ -33,10 +33,9 @@ def _coerce_dates(cfg: dict) -> dict:
 def load_adapters(name: str):
     if name == "mock":
         return MockFlightAdapter(), MockHotelAdapter()
-    if name == "amadeus":
-        from .adapters.amadeus import AmadeusFlightAdapter, AmadeusHotelAdapter, _AmadeusClient
-        client = _AmadeusClient()  # 환경변수에서 자동 로드
-        return AmadeusFlightAdapter(client), AmadeusHotelAdapter(client)
+    if name == "serpapi":
+        from .adapters.serpapi import SerpApiFlightAdapter, SerpApiHotelAdapter
+        return SerpApiFlightAdapter(), SerpApiHotelAdapter()
     if name == "playwright":
         from .adapters.playwright_skel import PlaywrightFlightAdapter, PlaywrightHotelAdapter
         return PlaywrightFlightAdapter(), PlaywrightHotelAdapter()
@@ -70,7 +69,7 @@ def main(argv=None) -> int:
     if candidates:
         top = candidates[0]
         print(
-            f"  최상위: {top.sunday} ~ {top.return_date}, "
+            f"  최상위: {top.arrival} ~ {top.return_date}, "
             f"1인 ₩{top.cost_per_person_krw:,}, 점수 {top.score:.3f}"
         )
     return 0

@@ -23,3 +23,6 @@ results/
 
 # Claude Code local settings
 .claude/
+
+# 임시 커밋 메시지 파일 (PowerShell HEREDOC 우회용)
+_commit_msg.tmp

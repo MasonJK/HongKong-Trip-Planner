@@ -15,15 +15,17 @@ _WEEKDAY_MAP = {
 
 
 def generate_candidate_dates(
-    start: date, end: date, weekday: str,
+    start: date, end: date, weekday,
     exclude_ranges: Optional[List[Dict]] = None,
 ) -> List[date]:
-    wd = _WEEKDAY_MAP[weekday.lower()]
+    if isinstance(weekday, str):
+        weekday = [weekday]
+    wds = {_WEEKDAY_MAP[w.lower()] for w in weekday}
     excludes = exclude_ranges or []
     days: List[date] = []
     d = start
     while d <= end:
-        if d.weekday() == wd:
+        if d.weekday() in wds:
             blocked = any(ex["start"] <= d <= ex["end"] for ex in excludes)
             if not blocked:
                 days.append(d)
@@ -113,7 +115,7 @@ def optimize(config: Dict, flight_adapter: FlightAdapter, hotel_adapter: HotelAd
     earliest = parse_hhmm(fly_cfg["earliest_departure"])
     latest = parse_hhmm(fly_cfg["latest_arrival"])
 
-    sundays = generate_candidate_dates(
+    arrival_dates = generate_candidate_dates(
         date.fromisoformat(str(trip["date_range"]["start"])),
         date.fromisoformat(str(trip["date_range"]["end"])),
         trip["arrival_day_of_week"],
@@ -121,23 +123,23 @@ def optimize(config: Dict, flight_adapter: FlightAdapter, hotel_adapter: HotelAd
     )
 
     candidates: List[TripCandidate] = []
-    for sunday in sundays:
-        return_ = sunday + timedelta(days=nights)
+    for arrival in arrival_dates:
+        return_ = arrival + timedelta(days=nights)
 
         flights = flight_adapter.search(
-            origin, destination, sunday, return_, pax, fly_cfg["max_stops"]
+            origin, destination, arrival, return_, pax, fly_cfg["max_stops"]
         )
         flights = [f for f in flights if flight_within_window(f, earliest, latest)]
         flights = flights[: fly_cfg.get("top_k_per_date", 5)]
 
-        hotels = hotel_adapter.search("Hong Kong", sunday, return_, rooms, pax)
+        hotels = hotel_adapter.search("Hong Kong", arrival, return_, rooms, pax)
         hotels = [h for h in hotels if h.review_score >= hotel_cfg["min_review_score"]]
         hotels = hotels[: hotel_cfg.get("top_k_per_date", 5)]
 
         for f in flights:
             for h in hotels:
                 cand = TripCandidate(
-                    sunday=sunday,
+                    arrival=arrival,
                     return_date=return_,
                     nights=nights,
                     pax=pax,

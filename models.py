@@ -45,7 +45,7 @@ class Hotel:
 
 @dataclass
 class TripCandidate:
-    sunday: date
+    arrival: date
     return_date: date
     nights: int
     pax: int

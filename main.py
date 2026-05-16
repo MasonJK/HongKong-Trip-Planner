@@ -70,7 +70,7 @@ def main(argv=None) -> int:
     if candidates:
         top = candidates[0]
         print(
-            f"  최상위: {top.sunday} ~ {top.return_date}, "
+            f"  최상위: {top.arrival} ~ {top.return_date}, "
             f"1인 ₩{top.cost_per_person_krw:,}, 점수 {top.score:.3f}"
         )
     return 0

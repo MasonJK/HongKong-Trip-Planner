@@ -27,7 +27,7 @@ def render_markdown(candidates: List[TripCandidate], budget_per_pax: int) -> str
         h = c.hotel
         lines.append(f"## Rank {i}  ·  {_krw(c.cost_per_person_krw)}/인  ·  점수 {c.score:.3f}")
         lines.append("")
-        lines.append(f"- 일정: **{c.sunday:%Y-%m-%d(%a)} 도착 → {c.return_date:%Y-%m-%d(%a)} 귀국** · {c.nights}박")
+        lines.append(f"- 일정: **{c.arrival:%Y-%m-%d(%a)} 도착 → {c.return_date:%Y-%m-%d(%a)} 귀국** · {c.nights}박")
         lines.append("")
         lines.append("**✈ 항공편**")
         lines.append(
@@ -88,7 +88,7 @@ def write_csv(candidates: List[TripCandidate], path: Path) -> None:
             f, h = c.flight, c.hotel
             w.writerow([
                 i, c.score, c.cost_per_person_krw, c.total_cost_krw,
-                c.sunday.isoformat(), c.return_date.isoformat(),
+                c.arrival.isoformat(), c.return_date.isoformat(),
                 f.outbound.carrier, f.outbound.flight_no,
                 f.outbound.depart_time.isoformat(), f.outbound.arrive_time.isoformat(),
                 f.outbound.stops,

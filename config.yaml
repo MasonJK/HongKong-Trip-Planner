@@ -2,7 +2,7 @@
 trip:
   origin: ICN
   destination: HKG
-  arrival_day_of_week: sunday
+  arrival_day_of_week: [sunday, saturday]   # 일요일 선호, 토요일도 허용
   nights: 4
   date_range:
     start: 2026-10-01
@@ -16,7 +16,7 @@ flight:
   max_stops: 1
   earliest_departure: "06:00"   # 출/도착 모두 적용
   latest_arrival:    "23:30"
-  preferred_carriers: [KE, OZ, CX, HX]
+  preferred_carriers: []   # (현재 미사용, 향후 필터/점수 연동 예정)
   top_k_per_date: 5
 
 hotel:
@@ -37,6 +37,7 @@ side_trips:
 # 제외할 날짜 (가격 급등 등)
 exclude_date_ranges:
   - { start: 2026-10-01, end: 2026-10-06, reason: "중국 국경절" }
+  - { start: 2026-10-17, end: 2026-10-19, reason: "중양절 (HK 공휴일)" }
 
 ranking:
   weights:

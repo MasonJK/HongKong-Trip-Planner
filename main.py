@@ -65,6 +65,7 @@ def main(argv=None) -> int:
     md_path.write_text(md, encoding="utf-8")
     write_csv(candidates, csv_path)
 
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     print(f"✓ {len(candidates)}개 후보 → {md_path}, {csv_path}")
     if candidates:
         top = candidates[0]

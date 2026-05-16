@@ -34,22 +34,65 @@ _BASE = "https://serpapi.com/search.json"
 
 # ---- 공통 ----------------------------------------------------------------
 
+def _load_env_file(path: str) -> None:
+    """KEY=VALUE 형식 파일을 os.environ에 주입.
+
+    파일에 `=`가 하나도 없으면 파일명에서 키 이름을 추론(예: serp_api.env → SERPAPI_KEY)
+    하고 파일 전체 내용을 그 값으로 간주. 사용자가 키만 덜렁 붙여넣은 경우 대응.
+    """
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+
+    has_equals = any(("=" in ln and not ln.strip().startswith("#")) for ln in text.splitlines())
+    if has_equals:
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    else:
+        # 파일명 → 환경변수 키 (serp_api.env → SERPAPI_KEY, 그 외 X.env → X_KEY)
+        base = os.path.splitext(os.path.basename(path))[0]
+        if base.lower() in ("serp_api", "serpapi"):
+            env_key = "SERPAPI_KEY"
+        else:
+            env_key = base.upper().replace("-", "_") + "_KEY"
+        value = text.strip().strip('"').strip("'")
+        if value:
+            os.environ.setdefault(env_key, value)
+
+
 def _get_key() -> str:
-    # .env 자동 로딩 (의존성 없이 직접 파싱)
-    if not os.environ.get("SERPAPI_KEY"):
-        env_path = ".env"
-        if os.path.exists(env_path):
-            with open(env_path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#") or "=" not in line:
-                        continue
-                    k, v = line.split("=", 1)
-                    os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
-    key = os.environ.get("SERPAPI_KEY")
-    if not key:
-        raise RuntimeError("SERPAPI_KEY 환경변수가 설정되지 않았습니다. .env 파일을 확인하세요.")
-    return key
+    """SERPAPI_KEY를 환경변수 또는 표준 위치의 .env 파일에서 로드.
+
+    탐색 순서:
+      1. 이미 설정된 환경변수 SERPAPI_KEY
+      2. ./.env
+      3. ./env/serp_api.env
+      4. ./env/*.env
+    """
+    if os.environ.get("SERPAPI_KEY"):
+        return os.environ["SERPAPI_KEY"]
+
+    candidates = [".env", os.path.join("env", "serp_api.env")]
+    if os.path.isdir("env"):
+        for name in sorted(os.listdir("env")):
+            if name.endswith(".env"):
+                p = os.path.join("env", name)
+                if p not in candidates:
+                    candidates.append(p)
+
+    for path in candidates:
+        if os.path.isfile(path):
+            _load_env_file(path)
+            if os.environ.get("SERPAPI_KEY"):
+                return os.environ["SERPAPI_KEY"]
+
+    raise RuntimeError(
+        "SERPAPI_KEY를 찾지 못했습니다. .env 또는 env/serp_api.env에 "
+        "'SERPAPI_KEY=...' 줄을 두거나 환경변수로 직접 설정하세요."
+    )
 
 
 def _api_get(params: Dict, cache: Optional[Cache] = None) -> Dict:

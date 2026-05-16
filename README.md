@@ -16,14 +16,15 @@ python -m trip_optimizer.main --config trip_optimizer/config.yaml --out results
 ### 1. API 키 발급 (무료)
 1. https://serpapi.com 가입 (카드 등록 불필요)
 2. Dashboard → **Your Private API Key** 복사
-3. 무료 등급: 월 100 검색까지
+3. 무료 등급: 월 250 검색까지
 
 ### 2. 키 설정
-`.env.example`을 `.env`로 복사 후 키 값만 채우기:
-```
-SERPAPI_KEY=발급받은_키
-```
-(`.env`는 `.gitignore`에 들어있어 절대 커밋되지 않음)
+다음 중 한 가지 방법:
+- 프로젝트 루트에 `.env` 파일을 만들고: `SERPAPI_KEY=발급받은_키`
+- 또는 `env/serp_api.env`에 키 값만 단독으로 저장
+- 또는 환경변수 직접 설정: `$env:SERPAPI_KEY = "..."` (PowerShell)
+
+`.env`와 `env/` 모두 `.gitignore`에 포함돼 절대 커밋되지 않습니다.
 
 ### 3. config.yaml에서 adapter 변경
 ```yaml
@@ -64,6 +65,6 @@ trip_optimizer/
 
 ## 한계와 주의
 
-- SerpAPI 무료 등급은 월 100 검색. 한 번 실행에 ~30~80 검색 소비. `cache.py`가 12시간 TTL로 같은 일자 재호출을 막아주지만, 일자 범위를 너무 넓히면 한도 초과.
+- SerpAPI 무료 등급은 월 250 검색. 시나리오 3종을 모두 켜고 한 번 실행에 ~70~100 검색 소비. `cache.py`가 12시간 TTL로 같은 일자 재호출을 막아주므로 같은 날 재실행은 무료. 일자 범위를 너무 넓히면 한도 초과 가능.
 - 4인 동일 항공편 좌석 확보는 실제 예약 단계에서 재확인.
 - Google Hotels는 일부 부티크/소규모 호텔이 빠질 수 있음.
